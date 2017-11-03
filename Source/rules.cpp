@@ -1,379 +1,275 @@
 #include "rules.h"
-
 #include <cmath>
+#include <functional>
 #include <limits>
 #include <typeinfo>
-#include <iostream>
 
 namespace rise
 {
 
 namespace // tools for internal usage
 {
+} /* end anonymous namespace */
 
-void intersect(const std::set<int>& s1, const std::set<int>& s2, std::set<int>& intersection)
+// RealCondition's methods
+
+double RealCondition::EPSILON = 1e-7;
+
+bool RealCondition::covers(const Attribute::Ptr& attr) const
 {
-  intersection.clear();
-  const std::set<int>& s1_ = s1.size() < s2.size()? s1 : s2;
-  const std::set<int>& s2_ = &s1_ != &s1? s1 : s2;
-  for (int x : s1_)
+  if (auto rattr = std::dynamic_pointer_cast<RealAttribute>(attr))
   {
-    if (s2_.count(x)) intersection.insert(x);
+    double number = rattr->get_number();
+    return number >= lower_bound_ and number <= upper_bound_;
   }
+  return false;
 }
 
-void conditional_probability_table(const Dataframe& df, int column, std::vector<double>& table)
+double RealCondition::distance(const Attribute::Ptr& attr) const
 {
-  int target_column = df.get_target_column();
-  auto n_attr = dynamic_cast<NominalAttribute*>(df.get_attributes()[column]);
-  auto class_attr = dynamic_cast<NominalAttribute*>(df.get_attributes()[target_column]);
-  int m = class_attr->get_domain().size();
-  int n = n_attr->get_domain().size();
-  table = std::vector<double>(m*n, 0.0);
-  std::vector<std::set<int>> filtered_by_class(m);
-  std::vector<std::set<int>> filtered_by_attr(n);
-  for (int idx = 0; idx < m; ++idx)
+  auto meta = std::dynamic_pointer_cast<RealAttributeMeta>(get_meta());
+  if (auto rattr = std::dynamic_pointer_cast<RealAttribute>(attr))
   {
-    df.filter(target_column, idx, filtered_by_class[idx]);
+    double number = rattr->get_number();
+    if (number < lower_bound_) return (lower_bound_ - number)/meta->get_range();
+    else if (number > upper_bound_) return (number - upper_bound_)/meta->get_range();
+    else return 0;
   }
-  for (int idx = 0; idx < n; ++idx)
-  {
-    df.filter(column, idx, filtered_by_attr[idx]);
-  }
-  for (int idx = 0; idx < m; ++idx)
-  {
-    for (int jdx = 0; jdx < n; ++jdx)
-    {
-      std::set<int> intersection;
-      intersect(filtered_by_class[idx], filtered_by_attr[jdx], intersection);
-      double num = intersection.size();
-      double den = filtered_by_attr[jdx].size();
-      table[idx*n + jdx] = num/den;
-    }
-  }
+  return -1;
 }
 
+Condition::Ptr RealCondition::adapt(const Attribute::Ptr& attr) const
+{
+  double lo = lower_bound_;
+  double up = upper_bound_;
+  if (auto rattr = std::dynamic_pointer_cast<RealAttribute>(attr))
+  {
+    double number = rattr->get_number();
+    if (number < lower_bound_) lo = number;
+    else if (number > upper_bound_) up = number;
+  }
+  return std::make_shared<RealCondition>(get_meta(), lo, up);
 }
 
-// Condition's methods
-
-Condition::Condition(const Attribute& attribute) : attribute_(attribute) {}
-
-// MatchAllCondition's methods
-
-MatchAllCondition::MatchAllCondition(const Attribute& attribute) : Condition(attribute) {}
-
-// RealRangeCondition's methods
-
-RealRangeCondition::RealRangeCondition(const Attribute& attribute, double minimum, double maximum)
-  : Condition(attribute), minimum_(minimum), maximum_(maximum)
+bool RealCondition::operator==(const Condition& other) const
 {
   try
   {
-    dynamic_cast<const RealAttribute&>(attribute);
+    auto c = dynamic_cast<const RealCondition&>(other);
+    return std::fabs(lower_bound_ - c.lower_bound_) < EPSILON and 
+           std::fabs(upper_bound_ - c.upper_bound_) < EPSILON;
   }
   catch (std::bad_cast&)
   {
-    throw RiseException("Given attribute does not have a real domain");
+    return false;
   }
 }
 
-bool RealRangeCondition::covers(const AttributeValue& value) const
+std::string RealCondition::to_str() const
 {
-  try
-  {
-    auto r_value = dynamic_cast<const RealAttributeValue&>(value);
-    double number = r_value.get_number();
-    return minimum_ <= number and number <= maximum_;
-  }
-  catch (std::bad_cast&)
-  {
-    throw RiseException("Given attribute value is not a real number");
-  }
-}
-
-std::string RealRangeCondition::to_str() const
-{
-  return std::to_string(minimum_) + "<=" + get_attribute().get_name() +
-    "<=" + std::to_string(maximum_);
+  std::ostringstream oss;
+  oss << lower_bound_ << "<=" << get_meta()->get_name() << "<=" << upper_bound_;
+  return oss.str();
 }
 
 // NominalCondition's methods
 
-NominalCondition::NominalCondition(const Attribute& attribute, int category)
-  : Condition(attribute), category_(category)
+bool NominalCondition::covers(const Attribute::Ptr& attr) const
+{
+  if (auto nattr = std::dynamic_pointer_cast<NominalAttribute>(attr))
+  {
+    return nattr->get_category() == category_;
+  }
+  return false;
+}
+
+double NominalCondition::distance(const Attribute::Ptr& attr) const
+{
+  auto meta = std::dynamic_pointer_cast<NominalAttributeMeta>(get_meta());
+  if (auto nattr = std::dynamic_pointer_cast<NominalAttribute>(attr))
+  {
+    return meta->lookup_distance(category_, nattr->get_category());
+  }
+  return -1;
+}
+
+Condition::Ptr NominalCondition::adapt(const Attribute::Ptr& attr) const
+{
+  if (auto nattr = std::dynamic_pointer_cast<NominalAttribute>(attr))
+  {
+    if (nattr->get_category() != category_) return Condition::Ptr();
+  }
+  return std::make_shared<NominalCondition>(get_meta(), category_);
+}
+
+bool NominalCondition::operator==(const Condition& other) const
 {
   try
   {
-    dynamic_cast<const NominalAttribute&>(attribute);
+    auto c = dynamic_cast<const NominalCondition&>(other);
+    return category_ == c.category_;
   }
   catch (std::bad_cast&)
   {
-    throw RiseException("Given attribute is not nominal");
+    return false;
   }
 }
 
-bool NominalCondition::covers(const AttributeValue& value) const
+std::size_t NominalCondition::hash() const
 {
-  try
-  {
-    auto n_value = dynamic_cast<const NominalAttributeValue&>(value);
-    return category_ == n_value.get_category_index();
-  }
-  catch (std::bad_cast&)
-  {
-    throw RiseException("Given attribute value is not nominal");
-  }
+  std::hash<std::string> h;
+  return h(category_);
 }
 
 std::string NominalCondition::to_str() const
 {
-  auto n_attr = dynamic_cast<const NominalAttribute&>(get_attribute());
-  return get_attribute().get_name() + "=" + n_attr.get_domain()[category_];
-}
-
-// RealDistance's methods
-
-RealDistance::RealDistance() {}
-
-double RealDistance::distance(const Condition& condition, const AttributeValue& value) const
-{
-  if (&condition.get_attribute() != &value.get_attribute())
-  {
-    throw RiseException("Condition and value's attributes are not equal");
-  }
-  if (value.missing()) return -1.0;
-  try
-  {
-    auto r_cond = dynamic_cast<const RealRangeCondition&>(condition);
-    auto num_value = dynamic_cast<const RealAttributeValue&>(value);
-    auto attribute = dynamic_cast<const RealAttribute&>(num_value.get_attribute());
-    double num = num_value.get_number();
-    double lower_bound = r_cond.get_minimum();
-    double upper_bound = r_cond.get_maximum();
-    double domain_size = attribute.get_maximum() - attribute.get_minimum();
-    if (num < lower_bound)
-    {
-      return (lower_bound - num)/domain_size;
-    }
-    if (num > upper_bound)
-    {
-      return (num - upper_bound)/domain_size;
-    }
-    else return 0.0;
-  }
-  catch (std::bad_cast&)
-  {
-    throw RiseException("Trying to compare heterogeneous types");
-  }
-}
-
-// NominalDistance's methods
-
-NominalDistance::NominalDistance(Type type, const Dataframe& df, int column, double q)
-{
-  auto n_attr = dynamic_cast<const NominalAttribute*>(df.get_attributes()[column]);
-  if (not n_attr) throw RiseException("Non-nominal attribute");
-  int n = n_attr->get_domain().size();
-  lookup_table_ = std::vector<double>(n*n, 0.0);
-  switch (type)
-  {
-    case SAME:
-      init_godel_distance(n);
-      break;
-    case SVDM:
-      init_svdm(n_attr, df, column, q);
-      break;
-    case KL:
-      init_kl(n_attr, df, column);
-      break;
-  }
-  //std::cout << container2str(lookup_table_) << std::endl;
-}
-
-double NominalDistance::distance(const Condition& condition, const AttributeValue& value) const
-{
-  if (&condition.get_attribute() != &value.get_attribute())
-  {
-    throw RiseException("Condition and value's attributes are not equal");
-  }
-  if (condition.matches_all() or value.missing()) return -1.0;
-  try
-  {
-    auto n_cond = dynamic_cast<const NominalCondition&>(condition);
-    auto nom_value = dynamic_cast<const NominalAttributeValue&>(value);
-    auto attribute = dynamic_cast<const NominalAttribute&>(nom_value.get_attribute());
-    int n = attribute.get_domain().size();
-    if (n*n != (int)lookup_table_.size())
-    {
-      throw RiseException("Wrong domain size");
-    }
-    int idx = n_cond.get_category_index();
-    int jdx = nom_value.get_category_index();
-    return lookup_table_[idx*n + jdx];
-  }
-  catch (std::bad_cast&)
-  {
-    throw RiseException("Trying to compare heterogeneous types");
-  }
-}
-
-void NominalDistance::init_godel_distance(int n)
-{
-  lookup_table_ = std::vector<double>(n*n, 1.0);
-  for (int idx = 0; idx < n; ++idx)
-  {
-    lookup_table_[idx*(n+1)] = 0.0;
-  }
-}
-
-void NominalDistance::init_svdm(const NominalAttribute* n_attr, const Dataframe& df,
-    int column, double q)
-{
-  int n = n_attr->get_domain().size();
-  std::vector<double> cond_probs;
-  conditional_probability_table(df, column, cond_probs);
-  int m = cond_probs.size()/n;
-  for (int idx = 0; idx < n; ++idx)
-  {
-    for (int jdx = 0; jdx < n; ++jdx)
-    {
-      for (int kdx = 0; kdx < m; ++kdx)
-      {
-        lookup_table_[idx*n + jdx] += std::pow(
-            std::fabs(cond_probs[kdx*n+idx] - cond_probs[kdx*n+jdx]), q);
-      }
-      lookup_table_[idx*n + jdx] /= m;
-    }
-  }
-}
-
-void NominalDistance::init_kl(const NominalAttribute* n_attr, const Dataframe& df,
-    int column)
-{
-  int n = n_attr->get_domain().size();
-  std::vector<double> cond_probs;
-  conditional_probability_table(df, column, cond_probs);
-  int m = cond_probs.size()/n;
-  for (int idx = 0; idx < n; ++idx)
-  {
-    for (int jdx = 0; jdx < n; ++jdx)
-    {
-      for (int kdx = 0; kdx < m; ++kdx)
-      {
-        if (cond_probs[kdx*n + idx] > 0.0)
-        {
-          lookup_table_[idx*n + jdx] -= cond_probs[kdx*n+idx]*
-            std::log2(cond_probs[kdx*n+jdx]/cond_probs[kdx*n+idx]);
-        }
-        else if (cond_probs[kdx*n+jdx] > 0.0)
-        {
-          lookup_table_[idx*n + jdx] = std::numeric_limits<double>::infinity();
-          break;
-        }
-      }
-    }
-  }
+  std::ostringstream oss;
+  oss << get_meta()->get_name() << "=" << category_;
+  return oss.str();
 }
 
 // Rule's methods
 
-Rule::Rule(const Instance& instance, int target_column)
-  : conditions_(instance.size(), nullptr)
+Rule::Rule(const Instance& instance, const std::vector<AttributeMeta::Ptr>& meta)
 {
-  for (int column = 0; column < (int)instance.size(); ++column)
+  const std::vector<Attribute::Ptr>& x = instance.get_x();
+  if (x.size() != meta.size()) throw RiseException("Different size of meta vector and x");
+  consequent_ = instance.get_y();
+  antecedent_.resize(instance.get_x().size());
+  for (int idx = 0; idx < x.size(); ++idx)
   {
-    if (column != target_column)
+    if (auto rattr = std::dynamic_pointer_cast<RealAttribute>(x[idx]))
     {
-      if (instance[column]->missing())
-      {
-        conditions_[column] = new MatchAllCondition(instance[column]->get_attribute());
-      }
-      else if (auto r_attr = dynamic_cast<const RealAttributeValue*>(instance[column]))
-      {
-        conditions_[column] = new RealRangeCondition(r_attr->get_attribute(),
-            r_attr->get_number(), r_attr->get_number());
-      }
-      else if (auto n_attr = dynamic_cast<const NominalAttributeValue*>(instance[column]))
-      {
-        conditions_[column] = new NominalCondition(n_attr->get_attribute(),
-            n_attr->get_category_index());
-      }
+      antecedent_[idx] = std::make_shared<RealCondition>(
+          meta[idx], rattr->get_number(), rattr->get_number());
+    }
+    else if (auto nattr = std::dynamic_pointer_cast<NominalAttribute>(x[idx]))
+    {
+      antecedent_[idx] = std::make_shared<NominalCondition>(
+          meta[idx], nattr->get_category());
     }
   }
 }
 
-Rule::Rule(const Rule& other, const Instance& instance) : conditions_(other.conditions_.size())
+const std::string& Rule::get_consequent() const
 {
-  
-}
-
-//Rule::Rule(const std::vector<Condition*> conditions) : conditions_(conditions) {}
-
-double Rule::distance(const Instance& instance, const Metric& metric) const
-{
-  int n = instance.size();
-  if (n != (int)metric.size() or n != (int)conditions_.size())
-  {
-    throw RiseException("Inconsistent instance/metric size");
-  }
-  int count = 0;
-  double distance = 0.0;
-  for (int idx = 0; idx < n; ++idx)
-  {
-    if (metric[idx] != nullptr and conditions_[idx] != nullptr)
-    {
-      double d = metric[idx]->distance(*conditions_[idx], *instance[idx]);
-      if (d >= 0)
-      {
-        distance += d;
-        ++count;
-      }
-    }
-  }
-  distance /= count;
-  return distance;
+  return std::dynamic_pointer_cast<NominalAttribute>(consequent_)->get_category();
 }
 
 bool Rule::covers(const Instance& instance) const
 {
-  int n = instance.size();
-  if (n != (int)conditions_.size())
+  const std::vector<Attribute::Ptr>& x = instance.get_x();
+  for (int idx = 0; idx < x.size(); ++idx)
   {
-    throw RiseException("Inconsistent instance/metric size");
-  }
-  for (int idx = 0; idx < n; ++idx)
-  {
-    if (conditions_[idx] != nullptr)
-    {
-      if (not conditions_[idx]->covers(*instance[idx])) return false;
-    }
+    if (antecedent_[idx] and not antecedent_[idx]->covers(x[idx])) return false;
   }
   return true;
+}
+
+double Rule::distance(const Instance& instance) const
+{
+  const std::vector<Attribute::Ptr>& x = instance.get_x();
+  double dist_total = 0.0;
+  int count = 0;
+  for (int idx = 0; idx < x.size(); ++idx)
+  {
+
+    if (not antecedent_[idx]) ++count;
+    else
+    {
+      double d = antecedent_[idx]->distance(x[idx]);
+      if (d >= 0)
+      {
+        dist_total += d;
+        ++count;
+      }
+    }
+  }
+  dist_total /= count;
+  return dist_total;
+}
+
+Rule::Ptr Rule::adapt(const Instance& instance) const
+{
+  const std::vector<Attribute::Ptr>& x = instance.get_x();
+  auto rule = std::make_shared<Rule>(*this);
+  for (int idx = 0; idx < x.size(); ++idx)
+  {
+    if (rule->antecedent_[idx])
+    {
+      rule->antecedent_[idx] = rule->antecedent_[idx]->adapt(x[idx]);
+    }
+  }
+  return rule;
+}
+
+bool Rule::operator==(const Rule& other) const
+{
+
+  for (int idx = 0; idx < antecedent_.size(); ++idx)
+  {
+    if (antecedent_[idx] and other.antecedent_[idx] and
+        *antecedent_[idx] != *other.antecedent_[idx]) return false;
+    else if ((bool)antecedent_[idx] xor (bool)other.antecedent_[idx]) return false;
+  }
+  return *consequent_ == *other.consequent_;;
+}
+
+void Rule::evaluate_rule(const Dataframe& df)
+{
+  int instances_same_class = 0;
+  int correctly_classified = 0;
+  n_instances_covered_ = 0;
+  const std::string& rule_class = get_consequent();
+  for (const Instance& instance : df.get_instances())
+  {
+    auto instance_class = std::dynamic_pointer_cast<NominalAttribute>(instance.get_y());
+    if (covers(instance))
+    {
+      ++n_instances_covered_;
+      if (instance_class->get_category() == rule_class)
+      {
+        ++correctly_classified;
+      }
+    }
+    if (instance_class->get_category() == rule_class)
+    {
+      ++instances_same_class;
+    }
+    coverage_ = ((double)correctly_classified) / instances_same_class;
+    precision_ = ((double)correctly_classified) / n_instances_covered_;
+  }
+}
+
+std::size_t Rule::hash() const
+{
+  std::size_t h = 0;
+  std::hash<std::string> hs;
+  for (const auto& cond : antecedent_)
+  {
+    if (cond) h ^= cond->hash() + 0x9e3779b9 + (h<<6) + (h>>2);
+  }
+  h ^= hs(std::dynamic_pointer_cast<NominalAttribute>(consequent_)->get_category())
+    + 0x9e3779b9 + (h<<6) + (h>>2);
+  return h;
 }
 
 std::string Rule::to_str() const
 {
   std::ostringstream oss;
   bool first = true;
-  for (Condition* condition : conditions_)
+  for (const auto& condition : antecedent_)
   {
-    if (condition != nullptr and not condition->matches_all())
+    if (condition)
     {
-      if (not first) oss << ',';
-      oss << '(' <<  *condition << ')';
+      if (not first) oss << ", ";
+      oss << *condition;
       first = false;
     }
   }
+  oss << " -> " << *consequent_ << " (coverage: " << coverage_*100.0
+      << "%, precision: " << precision_*100.0 << "%, f1: " << get_f1_score() << ')';
   return oss.str();
-}
-
-Rule::~Rule()
-{
-  for (Condition* condition : conditions_)
-  {
-    if (condition != nullptr) delete condition;
-  }
 }
 
 } /* end namespace rise */

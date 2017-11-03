@@ -7,6 +7,6 @@ $(BUILDIR):
 	mkdir -p $(BUILDIR)
 
 clean:
-	rm -rf $(BUILDIR)
+	rm -rf $(BUILDIR)/*
 
 

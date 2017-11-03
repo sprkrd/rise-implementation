@@ -1,10 +1,10 @@
 CXX = g++
-FLAGS = -Wall -Werror -O2 -std=c++11
+FLAGS = -Wall -Werror -Wno-sign-compare -Wno-unused-function  -O2 -std=c++11
 BUILDIR = ../build
-SOURCES = common.cpp csv_reader.cpp dataframe.cpp rules.cpp
+SOURCES = common.cpp csv_reader.cpp dataframe.cpp rules.cpp algorithm.cpp
 OBJECTS = $(addprefix $(BUILDIR)/,$(SOURCES:cpp=o))
 LIBRARY = $(BUILDIR)/librise.so
-SOURCES_BIN = common_test.cpp csv_reader_test.cpp dataframe_test.cpp rules_test.cpp
+SOURCES_BIN = common_test.cpp csv_reader_test.cpp dataframe_test.cpp rules_test.cpp algorithm_test.cpp rise_classifier.cpp
 BINARIES = $(addprefix $(BUILDIR)/,$(basename $(SOURCES_BIN)))
 
 all: $(LIBRARY) $(BINARIES) 

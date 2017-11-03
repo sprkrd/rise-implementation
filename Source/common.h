@@ -2,10 +2,16 @@
 #define COMMON_H
 
 #include <exception>
+#include <map>
+#include <memory>
 #include <ostream>
+#include <set>
 #include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
+
+#define S(ptr) (ptr ? ptr->to_str() : "?")
 
 namespace rise
 {
@@ -13,13 +19,13 @@ namespace rise
 class Stringifiable;
 class RiseException;
 class Attribute;
-class AttributeValue;
 class RealAttribute;
-class RealAttributeValue;
 class NominalAttribute;
-class NominalAttributeValue;
-class MissingAttributeValue;
-typedef std::vector<AttributeValue*> Instance;
+class AttributeMeta;
+class RealAttributeMeta;
+class NominalAttributeMeta;
+class Instance;
+typedef std::pair<std::string, std::string> CategoryPair;
 
 class Stringifiable
 {
@@ -34,7 +40,6 @@ class RiseException : public std::exception
 {
   public:
 
-    int columns_;
     explicit RiseException(const std::string& msg) noexcept : msg_(msg) {}
 
     virtual const char* what() const noexcept override { return msg_.c_str(); }
@@ -42,127 +47,154 @@ class RiseException : public std::exception
   private:
 
     std::string msg_;
-
 };
 
 class Attribute : public Stringifiable
 {
   public:
 
-    Attribute(const std::string& name);
+    typedef std::shared_ptr<Attribute> Ptr;
 
-    const std::string& get_name() const { return name_; }
+    static Ptr create(void) { return Ptr(); }
+
+    virtual bool operator==(const Attribute& other) const = 0;
 
     virtual ~Attribute() {}
-
-  private:
-
-    std::string name_;
-
-};
-
-class AttributeValue : public Stringifiable
-{
-  public:
-
-    AttributeValue(const Attribute& attribute);
-
-    const Attribute& get_attribute() const { return attribute_; }
-
-    virtual bool missing() const { return false; };
-
-  private:
-
-    const Attribute& attribute_;
 };
 
 class RealAttribute : public Attribute
 {
   public:
 
-    RealAttribute(const std::string& name, double minimum=0, double maximum=0);
+    typedef std::shared_ptr<RealAttribute> Ptr;
 
-    double get_minimum() const { return minimum_; }
+    static Ptr create(double value);
 
-    void set_minimum(double minimum) { minimum_ = minimum; }
+    static Ptr create(const std::string& value);
 
-    double get_maximum() const { return maximum_; }
-
-    void set_maximum(double maximum) { maximum_ = maximum; }
-
-    virtual std::string to_str() const override;
-
-  private:
-
-    double minimum_, maximum_;
-};
-
-class RealAttributeValue : public AttributeValue
-{
-  public:
-
-    RealAttributeValue(const Attribute& attribute, double number);
+    RealAttribute(double number) : number_(number) {}
 
     double get_number() const { return number_; }
 
-    virtual std::string to_str() const override { return std::to_string(number_); }
+    virtual bool operator==(const Attribute& other) const override;
+
+    virtual std::string to_str() const { return std::to_string(number_); }
 
   private:
 
     double number_;
 };
 
-class NominalAttribute : public Attribute
+class NominalAttribute: public Attribute
 {
   public:
 
-    NominalAttribute(const std::string& name,
-        const std::vector<std::string>& domain=std::vector<std::string>());
+    typedef std::shared_ptr<NominalAttribute> Ptr;
 
-    int get_index(const std::string& category) const;
+    static Ptr create(const std::string& value);
 
-    const std::vector<std::string>& get_domain() const { return domain_; }
+    NominalAttribute(const std::string& category) : category_(category) {}
 
-    void set_domain(const std::vector<std::string>& domain) { domain_ = domain; }
+    const std::string& get_category() const { return category_; }
 
-    virtual std::string to_str() const override;
-      
+    virtual bool operator==(const Attribute& other) const override;
+
+    virtual std::string to_str() const { return category_; }
+
   private:
 
-    std::vector<std::string> domain_;
-
+    std::string category_;
 };
 
-class NominalAttributeValue : public AttributeValue
+class AttributeMeta : public Stringifiable
 {
   public:
 
-    NominalAttributeValue(const Attribute& attribute, const std::string& category);
+    typedef std::shared_ptr<AttributeMeta> Ptr;
 
-    int get_category_index() const { return index_; }
+    AttributeMeta(const std::string& name) : name_(name) {}
 
-    const std::string& get_category() const;
+    const std::string& get_name() const { return name_; }
 
-    virtual std::string to_str() const override { return get_category(); }
+    virtual ~AttributeMeta() {}
+
+  private:
+
+    std::string name_;
+};
+
+class RealAttributeMeta : public AttributeMeta
+{
+  public:
+
+    typedef std::shared_ptr<RealAttributeMeta> Ptr;
+
+    RealAttributeMeta(const std::string& name) : AttributeMeta(name) {}
+
+    double get_lower_bound() const { return lower_bound_; }
+
+    double get_upper_bound() const { return upper_bound_; }
+
+    double get_range() const { return upper_bound_ - lower_bound_; }
+
+    void set_lower_bound(double lo) { lower_bound_ = lo; }
+
+    void set_upper_bound(double up) { upper_bound_ = up; }
+
+    virtual std::string to_str() const override;
+
+  private:
+
+    double lower_bound_, upper_bound_;
+};
+
+class NominalAttributeMeta : public AttributeMeta
+{
+  public:
+
+    typedef std::shared_ptr<NominalAttributeMeta> Ptr;
+
+    NominalAttributeMeta(const std::string& name) : AttributeMeta(name) {}
+
+    const std::set<std::string>& get_domain() const { return domain_; }
+
+    void set_domain(const std::set<std::string>& domain) { domain_ = domain; }
+
+    void set_lookup(const std::map<CategoryPair, double>& lu) { distance_lu_ = lu; }
+
+    double lookup_distance(const std::string& c1, const std::string& c2) const;
+
+    virtual std::string to_str() const override;
+
+  private:
+
+    std::set<std::string> domain_;
+    std::map<CategoryPair, double> distance_lu_;
+};
+
+class Instance : public Stringifiable
+{
+  public:
+
+    Instance(int index, const std::vector<Attribute::Ptr>& x, const Attribute::Ptr& y)
+      : index_(index), x_(x), y_(y) {}
+
+    int get_index() const { return index_; }
+
+    const std::vector<Attribute::Ptr>& get_x() const { return x_; }
+
+    const Attribute::Ptr& get_y() const { return y_; }
+
+    const std::string& get_class() const;
+
+    virtual std::string to_str() const override;
 
   private:
 
     int index_;
-
+    std::vector<Attribute::Ptr> x_;
+    Attribute::Ptr y_;
 };
-
-class MissingAttributeValue : public AttributeValue
-{
-  public:
-
-    MissingAttributeValue(const Attribute& attribute);
-
-    virtual std::string to_str() const override { return "?"; }
-
-    virtual bool missing() const override { return true; }
-};
-
-std::ostream& operator<<(std::ostream& os, const Stringifiable& strable);
 
 template <class Container>
 std::string container2str(const Container& ctr,
@@ -182,6 +214,8 @@ std::string container2str(const Container& ctr,
   oss << close;
   return oss.str();
 }
+
+std::ostream& operator<<(std::ostream& os, const Stringifiable& strable);
 
 } /* end namespace rise */
 
