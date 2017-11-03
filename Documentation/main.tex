@@ -15,6 +15,7 @@
 \usepackage[colorinlistoftodos]{todonotes}
 \usepackage[colorlinks=true, allcolors=blue]{hyperref}
 \usepackage[vlined, ruled, linesnumbered, commentsnumbered]{algorithm2e}
+\usepackage{hyperref}
 
 \title{PW1: RISE, a rule-based classifier}
 \author{Alejandro Su\'arez Hern\'andez}
@@ -46,7 +47,7 @@ Our implementation retains most of the features described in the original work b
 \section{Rule metrics}
 \label{sec:distance}
 
-As we have mentioned, the computation of distances between rules and instances plays a crucial role both in the training algorithm and in the classification algorithm. We mostly stick to the strategy proposed in the original paper, with only a few differences: We normalize all the distances between 0 and 1, and we consider additional metrics for comparing nominal values, in addition to SVDM(q):
+As we have mentioned, the computation of distances between rules and instances plays a crucial role both in the training algorithm and in the classification algorithm. We mostly stick to the strategy proposed in the original paper, with only a few differences: we normalize all the distances between 0 and 1, and we consider additional metrics for comparing nominal values, in addition to SVDM(q):
 \begin{itemize}
 	\item The G\"odel (or overlap) difference. The difference between two nominal categories is as follows:
 	\[D(a_i, a_i') = 1 - \delta_{a_i, a_i'} \],
@@ -71,7 +72,7 @@ This section is devoted to explain the algorithm of the RISE classifier, both fo
 
 \subsection{Training}
 
-Fig.~\ref{alg:msg} shows the \emph{Most Specific Generalization} routine foreshadowed in the previous section. This routine is a key piece in the RISE's training algorithm, outlined in Fig.~\ref{alg:rise}. Notice that the algorithm works in a Hill-Climbing fashion, tring to increase the accuracy in each iteration of the main loop. However, observe that if we were trying to increase the accuracy in the conventional sense, the algorithm would be able to generalize very few rules. In effect, the accuracy would be 100\% from the very begining, and only generalizations that have no impact on the accuracy whatsoever would be accepted). Therefore, the accuracy is computed classifying each instance leaving out the nearest rule that covers it, provided that it does not cover any other instance (i.e. if the rule has not been generalized).
+Fig.~\ref{alg:msg} shows the \emph{Most Specific Generalization} routine foreshadowed in the previous section. This routine is a key piece in the RISE's training algorithm, outlined in Fig.~\ref{alg:rise}. Notice that the algorithm works in a Hill-Climbing fashion, trying to increase the accuracy in each iteration of the main loop. However, observe that if we were trying to increase the accuracy in the conventional sense, the algorithm would be able to generalize very few rules. In effect, the accuracy would be 100\% from the very begining, and only generalizations that have no impact on the accuracy whatsoever would be accepted). Therefore, the accuracy is computed classifying each instance leaving out the nearest rule that covers it, provided that it does not cover any other instance (i.e. if the rule has not been generalized).
 
 It is interesting to notice that the algorithm shown here explicitly handles duplicate rules, leaving just one occurrence of them in the rule base. In our implementation, we ensure this invariant storing the rules in a \emph{hash set}. To allow this, we had to define a custom hash for the rules. This proved to be very effective from a maintanability point of view. Although it has not been tested, it is possible that the algorithm's efficiency also benefits from this decision since rules can be found in constant time (in average), unlike in vectors and lists.
 
@@ -254,7 +255,7 @@ The first argument of the program must be one of the data sets in the \texttt{Da
                                  # the KL distance. Output rules
 \end{lstlisting}
 
-The implementation, this report and other additional files have been made available via a repository\footnore{\url{https://github.com/sprkrd/rise-implementation}}.
+The implementation, this report and other additional files have been made available via a repository\footnote{\url{https://github.com/sprkrd/rise-implementation}}.
 
 \bibliographystyle{alpha}
 \bibliography{sample}

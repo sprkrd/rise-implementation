@@ -33,3 +33,8 @@ The first argument of the program must be one of the data sets in the `Data` fol
 ./rise_classifier hepatitis kl 1 # run on the Hepatitis data set using
                                  # the KL distance. Output rules
 ```
+
+## TO-DO
+
+* Doxygen documentation of the code
+
