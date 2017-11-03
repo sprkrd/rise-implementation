@@ -60,7 +60,7 @@ int main(int argc, char* argv[])
   Options options;
   if (not read_options(argc, argv, options))
   {
-    std::cerr << "Usage: dataframe_test datasetname {godel|svdm|kl} [q] #folds\n";
+    std::cerr << "Usage: " << argv[0] << " datasetname {godel|svdm|kl} [q] #folds\n";
     return -1;
   }
   try
